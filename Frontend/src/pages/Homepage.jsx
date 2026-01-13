@@ -4,16 +4,16 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import FeatureCard from '../components/FeatureCard';
 import Button from '../components/Button';
-import { MessageSquare, Upload, History, Lock } from 'lucide-react';
+import { Upload, History, Lock, Brain } from 'lucide-react';
 
 const Homepage = () => {
     const navigate = useNavigate();
 
     const features = [
         {
-            icon: MessageSquare,
-            title: 'AI Chat',
-            description: 'Engage in natural conversations with our advanced AI assistant powered by cutting-edge technology.',
+            icon: Brain,
+            title: 'RAG-Powered Accuracy',
+            description: 'Unlike common AI chatbots, we use Retrieval-Augmented Generation (RAG) to provide fact-based responses with significantly fewer hallucinations.',
         },
         {
             icon: Upload,
