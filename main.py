@@ -6,66 +6,43 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# Google & Chroma Libraries
+# Google Library
 import google.generativeai as genai
-import chromadb
-from chromadb.utils import embedding_functions
+
+# ✅ NEW: Pinecone Library
+from pinecone import Pinecone
 
 # --- 1. CONFIGURATION ---
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY") # <--- Get this from .env
 
 if not GOOGLE_API_KEY:
-    raise ValueError("❌ Missing API Key! Check your .env file.")
+    raise ValueError("❌ Missing Google API Key! Check your .env file.")
+if not PINECONE_API_KEY:
+    raise ValueError("❌ Missing Pinecone API Key! Check your .env file.")
 
+# Configure Gemini
 genai.configure(api_key=GOOGLE_API_KEY)
-# Using Flash for speed and higher rate limits
 model = genai.GenerativeModel('models/gemini-2.5-flash')
 
-client = chromadb.PersistentClient(path="./student_ai_db")
-google_ef = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-    api_key=GOOGLE_API_KEY,
-    model_name="models/text-embedding-004"
-)
+# ✅ CONNECT TO PINECONE
+pc = Pinecone(api_key=PINECONE_API_KEY)
+index_name = "cue2clarity" # Make sure this matches the index name you created on pinecone.io
 
-collection = client.get_or_create_collection(
-    name="academic_material",
-    embedding_function=google_ef
-)
+# Connect to the index
+index = pc.Index(index_name)
 
-app = FastAPI(title="Student AI Backend (Final)")
+app = FastAPI(title="Student AI Backend (Pinecone Cloud)")
 
-# ✅ RESTORED: The Mode Parameter
 class QueryRequest(BaseModel):
     question: str
-    mode: str = "LECTURE"  # Default to Lecture if not sent
+    mode: str = "LECTURE"
 
-# --- 2. HELPER: SAFE EMBEDDING (Retries if Google is busy) ---
+# --- 2. HELPER: SAFE EMBEDDING ---
 def embed_text_with_retry(text):
-    retries = 3
-    for attempt in range(retries):
-        try:
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-                task_type="retrieval_query"
-            )
-            return result['embedding']
-        except Exception as e:
-            if "429" in str(e) or "ResourceExhausted" in str(e):
-                wait_time = (attempt + 1) * 2
-                print(f"⚠️ Embedding Rate Limit hit. Waiting {wait_time}s...")
-                time.sleep(wait_time)
-            else:
-                raise e
-    raise HTTPException(status_code=429, detail="Server is too busy. Please wait 1 minute.")
-
-# --- REPLACE YOUR EXISTING RETRY FUNCTIONS WITH THESE ---
-
-# HELPER: SUPER SAFE EMBEDDING 🛡️
-def embed_text_with_retry(text):
-    retries = 5  # Increased retries
-    base_wait = 10 # Start waiting at 10 seconds (not 2)
+    retries = 5 
+    base_wait = 10
     
     for attempt in range(retries):
         try:
@@ -77,16 +54,15 @@ def embed_text_with_retry(text):
             return result['embedding']
         except Exception as e:
             if "429" in str(e) or "ResourceExhausted" in str(e):
-                wait_time = base_wait * (2 ** attempt) # 10s, 20s, 40s...
+                wait_time = base_wait * (2 ** attempt)
                 print(f"\n⏳ API Busy (Embedding). Pausing for {wait_time} seconds...")
                 time.sleep(wait_time)
             else:
-                raise e # Real error (crash)
+                raise e 
 
     raise HTTPException(status_code=429, detail="Google API is too busy. Please wait 2 minutes.")
 
-
-# HELPER: SUPER SAFE GENERATION 🛡️
+# --- 3. HELPER: SAFE GENERATION ---
 def generate_with_retry(prompt):
     retries = 5
     base_wait = 10 
@@ -97,7 +73,7 @@ def generate_with_retry(prompt):
             return response.text
         except Exception as e:
             if "429" in str(e) or "ResourceExhausted" in str(e):
-                wait_time = base_wait * (2 ** attempt) # 10s, 20s, 40s...
+                wait_time = base_wait * (2 ** attempt)
                 print(f"\n⏳ API Busy (Generation). Pausing for {wait_time} seconds...")
                 time.sleep(wait_time)
             else:
@@ -105,12 +81,10 @@ def generate_with_retry(prompt):
 
     raise HTTPException(status_code=429, detail="AI Overloaded. Try again later.")
 
-# --- 4. HELPER: TEXT CLEANING (Nuclear Option) ---
+# --- 4. HELPER: TEXT CLEANING ---
 def clean_text(text):
     if not text: return ""
-    # Fix standard arrows
     text = text.replace("→", "->").replace("⇒", "=>")
-    # Kill private unicode (broken PDF symbols)
     text = re.sub(r'[\ue000-\uf8ff]', '->', text)
     return text
 
@@ -120,45 +94,73 @@ async def chat_endpoint(request: QueryRequest):
     print(f"\n📨 [{request.mode}] Question: {request.question}")
     
     try:
-        # STEP A: Embed Question
+        # STEP A: Embed Question (Google)
         query_vector = embed_text_with_retry(request.question)
-        
-        # STEP B: Search Database
-        results = collection.query(
-            query_embeddings=[query_vector],
-            n_results=10 # High context for "Lenient" answers
+
+        # STEP B: Search Database (Pinecone)
+        search_results = index.query(
+            vector=query_vector,
+            top_k=10,
+            include_metadata=True
         )
         
-        if not results['documents'] or not results['documents'][0]:
+        matches = search_results['matches']
+        if not matches:
             context_text = "No relevant notes found."
             sources = []
         else:
-            # Clean chunks before giving them to Gemini
-            raw_chunks = results['documents'][0]
+            # 1. Extract the text for the AI to read
+            raw_chunks = [match['metadata']['text'] for match in matches if 'text' in match['metadata']]
             context_text = "\n\n".join([clean_text(c) for c in raw_chunks])
-            sources = results['metadatas'][0]
+            
+            # 2. Extract sources for the User to click (Unique list)
+            # We use a dictionary to remove duplicates based on the 'source' filename
+            unique_sources = {}
+            for match in matches:
+                meta = match['metadata']
+                filename = meta.get('source', 'Unknown')
+                
+                if filename not in unique_sources:
+                    unique_sources[filename] = {
+                        "source": filename,
+                        "pdf_url": meta.get('pdf_url', None), # <--- THIS IS THE NEW PART
+                        "chapter": meta.get('chapter', 'General'),
+                        "score": match['score']
+                    }
+            
+            # Convert back to a list
+            sources = list(unique_sources.values())
 
-        # STEP C: Construct the "Hybrid" Prompt
-        # This includes the Logic from your Tech Stack Document + The Code Fixes
+        # STEP C: Construct Prompt (Standard)
         system_instruction = f"""
-        You are STUDENT-AI, an expert academic tutor.
+        You are STUDENT-AI, a warm, encouraging, and intelligent academic tutor.
+        
+        YOUR GOAL: 
+        Make the student feel supported while explaining complex topics clearly.
         
         YOUR MODE: {request.mode}
         
         ────────────────────────────────────
-        MODE INSTRUCTIONS
+        VISUAL STYLE RULES (SOOTHING LAYOUT)
         ────────────────────────────────────
-        [LECTURE] -> Explain concepts clearly. Define terms. Use examples from notes.
-        [ASSIGNMENT] -> Do NOT give the answer. Give hints and point to the theory.
-        [EXAM] -> Analyze past trends. Mention how often this topic appears.
-        [DIFFICULTY] -> Rate as Easy/Medium/Hard based on complexity.
+        1. USE HEADERS: Start every major section with "### " (e.g., "### The Core Concept").
+        2. BOLDING: Use **bold text** to highlight keywords.
+        3. WHITESPACE: Short paragraphs. Blank lines between items.
+        4. LISTS: Use bullet points (-).
+        
+        ────────────────────────────────────
+        TONE & PERSONA
+        ────────────────────────────────────
+        1. WARM OPENER: Start friendly.
+        2. EMPATHY: Validate difficult topics.
+        3. ANALOGIES: Use simple comparisons.
         
         ────────────────────────────────────
         CORE RULES
         ────────────────────────────────────
-        1. CONTEXT ONLY: Answer using the notes below.
-        2. CLEAN OUTPUT: Use plain text only. No Unicode arrows (->), no emojis.
-        3. BE HELPFUL: If asked for a concept, define it AND list types/examples if found.
+        1. CONTEXT ONLY: Answer strictly using the notes below.
+        2. CLEAN OUTPUT: No Unicode arrows (->).
+        3. CITATIONS: Mention [Chapter: X] or [Source: Y].
         
         ────────────────────────────────────
         CONTEXT
