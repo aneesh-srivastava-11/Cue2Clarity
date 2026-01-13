@@ -5,9 +5,14 @@ import { Menu, X } from 'lucide-react';
 const Navbar = () => {
     const [isOpen, setIsOpen] = useState(false);
 
+    const scrollToFeatures = () => {
+        const featuresSection = document.getElementById('features');
+        if (featuresSection) {
+            featuresSection.scrollIntoView({ behavior: 'smooth' });
+        }
+    };
+
     const navLinks = [
-        { name: 'Home', path: '/' },
-        { name: 'Features', path: '/#features' },
         { name: 'Login', path: '/login' },
     ];
 
@@ -18,13 +23,19 @@ const Navbar = () => {
                     {/* Logo */}
                     <Link to="/" className="flex items-center space-x-2">
                         <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-                            <span className="text-black font-bold text-xl">A</span>
+                            <span className="text-black font-bold text-xl">C</span>
                         </div>
-                        <span className="text-xl font-bold text-white">AI Assistant</span>
+                        <span className="text-xl font-bold text-white">Cue2Clarity</span>
                     </Link>
 
                     {/* Desktop Navigation */}
                     <div className="hidden md:flex items-center space-x-8">
+                        <button
+                            onClick={scrollToFeatures}
+                            className="text-gray-300 hover:text-white transition-colors duration-200"
+                        >
+                            Features
+                        </button>
                         {navLinks.map((link) => (
                             <Link
                                 key={link.name}
@@ -50,6 +61,15 @@ const Navbar = () => {
             {isOpen && (
                 <div className="md:hidden bg-card border-t border-border animate-slide-in">
                     <div className="px-4 py-4 space-y-3">
+                        <button
+                            onClick={() => {
+                                scrollToFeatures();
+                                setIsOpen(false);
+                            }}
+                            className="block text-gray-300 hover:text-white transition-colors duration-200 py-2 w-full text-left"
+                        >
+                            Features
+                        </button>
                         {navLinks.map((link) => (
                             <Link
                                 key={link.name}

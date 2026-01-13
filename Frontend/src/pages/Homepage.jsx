@@ -41,7 +41,7 @@ const Homepage = () => {
                 <div className="max-w-4xl mx-auto text-center space-y-8 animate-fade-in">
                     {/* Headline */}
                     <h1 className="text-5xl md:text-7xl font-bold text-white leading-tight">
-                        Your AI Assistant,
+                        Your Learning Companion,
                         <br />
                         <span className="text-gradient">Reimagined</span>
                     </h1>
@@ -55,17 +55,10 @@ const Homepage = () => {
                     <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
                         <Button
                             variant="primary"
-                            onClick={() => navigate('/chat')}
-                            className="w-full sm:w-auto"
-                        >
-                            Get Started
-                        </Button>
-                        <Button
-                            variant="secondary"
                             onClick={() => navigate('/login')}
                             className="w-full sm:w-auto"
                         >
-                            Login
+                            Get Started
                         </Button>
                     </div>
                 </div>

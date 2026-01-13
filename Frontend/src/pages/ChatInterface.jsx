@@ -5,6 +5,7 @@ import TypingIndicator from '../components/TypingIndicator';
 import Button from '../components/Button';
 import {
     Send,
+    MessageSquare,
     Paperclip,
     Plus,
     Settings,
@@ -12,23 +13,37 @@ import {
     X,
     Trash2,
     Download,
-    LogOut
+    LogOut,
+    ChevronDown,
+    BookOpen,
+    GraduationCap,
+    BarChart,
+    FileText
 } from 'lucide-react';
 
 const ChatInterface = () => {
     const navigate = useNavigate();
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [messages, setMessages] = useState([
-        { id: 1, text: 'Hello! How can I assist you today?', isUser: false, timestamp: '10:30 AM' },
+        { id: 1, text: 'Happy to help you!', isUser: false, timestamp: '10:30 AM' },
     ]);
     const [inputValue, setInputValue] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [uploadedFile, setUploadedFile] = useState(null);
     const [chatHistory, setChatHistory] = useState([
-        { id: 1, title: 'Getting Started', preview: 'Hello! How can I assist...', active: true },
+        { id: 1, title: 'Getting Started', preview: 'Happy to help you!', active: true },
         { id: 2, title: 'Project Planning', preview: 'Can you help me with...', active: false },
         { id: 3, title: 'Code Review', preview: 'I need assistance reviewing...', active: false },
     ]);
+    const [selectedMode, setSelectedMode] = useState('Lectures');
+    const [dropdownOpen, setDropdownOpen] = useState(false);
+
+    const modes = [
+        { id: 'Lectures', icon: BookOpen, label: 'Lectures' },
+        { id: 'Exam', icon: GraduationCap, label: 'Exam' },
+        { id: 'Difficulty', icon: BarChart, label: 'Difficulty' },
+        { id: 'Assignment', icon: FileText, label: 'Assignment' },
+    ];
 
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -97,7 +112,7 @@ const ChatInterface = () => {
 
     const handleNewChat = () => {
         setMessages([
-            { id: 1, text: 'Hello! How can I assist you today?', isUser: false, timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) },
+            { id: 1, text: 'Happy to help you!', isUser: false, timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) },
         ]);
         setChatHistory(prev => prev.map(chat => ({ ...chat, active: false })));
     };
@@ -118,9 +133,9 @@ const ChatInterface = () => {
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center space-x-2">
                             <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-                                <span className="text-black font-bold text-lg">A</span>
+                                <span className="text-black font-bold text-lg">C</span>
                             </div>
-                            <span className="text-white font-semibold">AI Assistant</span>
+                            <span className="text-white font-semibold">Cue2Clarity</span>
                         </div>
                         <button
                             onClick={() => setSidebarOpen(false)}
@@ -145,8 +160,8 @@ const ChatInterface = () => {
                         <div
                             key={chat.id}
                             className={`p-3 rounded-lg cursor-pointer transition-all duration-200 ${chat.active
-                                    ? 'bg-white/10 border border-white/20'
-                                    : 'hover:bg-white/5 border border-transparent'
+                                ? 'bg-white/10 border border-white/20'
+                                : 'hover:bg-white/5 border border-transparent'
                                 }`}
                         >
                             <h4 className="text-white text-sm font-medium mb-1 truncate">
@@ -182,7 +197,42 @@ const ChatInterface = () => {
                                 <Menu size={24} />
                             </button>
                         )}
-                        <h2 className="text-white font-semibold">AI Assistant</h2>
+                        <div className="relative">
+                            <button
+                                onClick={() => setDropdownOpen(!dropdownOpen)}
+                                className="flex items-center space-x-2 text-white font-semibold hover:bg-white/10 px-3 py-2 rounded-lg transition-colors"
+                            >
+                                <span>{selectedMode}</span>
+                                <ChevronDown size={16} className={`transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`} />
+                            </button>
+
+                            {dropdownOpen && (
+                                <div className="absolute top-full left-0 mt-2 w-48 bg-card border border-border rounded-lg shadow-xl py-1 z-50">
+                                    {modes.map((mode) => (
+                                        <button
+                                            key={mode.id}
+                                            onClick={() => {
+                                                setSelectedMode(mode.id);
+                                                setDropdownOpen(false);
+                                                // Optional: Send a system message indicating mode switch
+                                                setMessages(prev => [...prev, {
+                                                    id: prev.length + 1,
+                                                    text: `Switched to ${mode.label} mode.`,
+                                                    isUser: false,
+                                                    isSystem: true,
+                                                    timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                                                }]);
+                                            }}
+                                            className={`w-full text-left px-4 py-3 text-sm hover:bg-white/5 flex items-center space-x-3 transition-colors ${selectedMode === mode.id ? 'text-white bg-white/5' : 'text-gray-400'
+                                                }`}
+                                        >
+                                            <mode.icon size={16} />
+                                            <span>{mode.label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                     <div className="flex items-center space-x-2">
                         <button

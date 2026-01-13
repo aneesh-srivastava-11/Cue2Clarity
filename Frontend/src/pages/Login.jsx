@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import Input from '../components/Input';
 import Button from '../components/Button';
 import { Github, Mail } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
     const navigate = useNavigate();
+    const { login, googleSignIn, loginAnonymously } = useAuth();
     const [formData, setFormData] = useState({
         email: '',
         password: '',
     });
     const [errors, setErrors] = useState({});
+    const [loading, setLoading] = useState(false);
+    const [authError, setAuthError] = useState('');
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -25,22 +29,52 @@ const Login = () => {
                 [name]: ''
             }));
         }
+        setAuthError('');
     };
 
-    const handleSubmit = (e) => {
+    const handleGoogleSignIn = async () => {
+        try {
+            setLoading(true);
+            await googleSignIn();
+            navigate('/chat');
+        } catch (error) {
+            console.error('Google Sign In Error:', error);
+            setAuthError('Failed to sign in with Google');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleGuestLogin = async () => {
+        try {
+            setLoading(true);
+            await loginAnonymously();
+            navigate('/chat');
+        } catch (error) {
+            console.error('Guest Login Error:', error);
+            setAuthError('Failed to continue as guest. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
 
         // Simple validation
         const newErrors = {};
         if (!formData.email) {
             newErrors.email = 'Email is required';
-        } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+        }
+
+        // OWASP: Regular expressions for email validation
+        // Using a basic one here, but can be more strict if needed.
+        else if (!/\S+@\S+\.\S+/.test(formData.email)) {
             newErrors.email = 'Email is invalid';
         }
+
         if (!formData.password) {
             newErrors.password = 'Password is required';
-        } else if (formData.password.length < 6) {
-            newErrors.password = 'Password must be at least 6 characters';
         }
 
         if (Object.keys(newErrors).length > 0) {
@@ -48,8 +82,18 @@ const Login = () => {
             return;
         }
 
-        // Navigate to chat interface (mock login)
-        navigate('/chat');
+        try {
+            setLoading(true);
+            await login(formData.email, formData.password);
+            navigate('/chat');
+        } catch (error) {
+            console.error('Login error:', error);
+            // OWASP: Do not fail exactly with "User not found" to prevent enumeration.
+            // Use generic messages.
+            setAuthError('Failed to sign in. Please check your credentials.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -60,13 +104,19 @@ const Login = () => {
                     {/* Logo/App Name */}
                     <div className="text-center mb-8">
                         <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4">
-                            <span className="text-black font-bold text-3xl">A</span>
+                            <span className="text-black font-bold text-3xl">C</span>
                         </div>
                         <h1 className="text-3xl font-bold text-white mb-2">Welcome Back</h1>
-                        <p className="text-gray-400">Sign in to continue to AI Assistant</p>
+                        <p className="text-gray-400">Sign in to continue to Cue2Clarity</p>
                     </div>
 
                     {/* Login Form */}
+                    {authError && (
+                        <div className="bg-red-500/10 border border-red-500/50 text-red-500 text-sm p-3 rounded-lg mb-4 text-center">
+                            {authError}
+                        </div>
+                    )}
+
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <Input
                             type="email"
@@ -76,6 +126,7 @@ const Login = () => {
                             value={formData.email}
                             onChange={handleChange}
                             error={errors.email}
+                            disabled={loading}
                         />
 
                         <Input
@@ -86,6 +137,7 @@ const Login = () => {
                             value={formData.password}
                             onChange={handleChange}
                             error={errors.password}
+                            disabled={loading}
                         />
 
                         <div className="flex items-center justify-between text-sm">
@@ -98,8 +150,8 @@ const Login = () => {
                             </a>
                         </div>
 
-                        <Button type="submit" variant="primary" className="w-full">
-                            Login
+                        <Button type="submit" variant="primary" className="w-full" disabled={loading}>
+                            {loading ? 'Logging in...' : 'Login'}
                         </Button>
                     </form>
 
@@ -119,18 +171,34 @@ const Login = () => {
                             <Github size={20} />
                             GitHub
                         </Button>
-                        <Button variant="ghost" className="w-full border border-border">
+                        <Button
+                            variant="ghost"
+                            className="w-full border border-border"
+                            onClick={handleGoogleSignIn}
+                            disabled={loading}
+                        >
                             <Mail size={20} />
                             Google
+                        </Button>
+                    </div>
+
+                    <div className="mt-4">
+                        <Button
+                            onClick={handleGuestLogin}
+                            variant="ghost"
+                            className="w-full border border-border text-gray-400 hover:text-white"
+                            disabled={loading}
+                        >
+                            Skip for now (Guest)
                         </Button>
                     </div>
 
                     {/* Create Account */}
                     <p className="text-center text-gray-400 text-sm mt-8">
                         Don't have an account?{' '}
-                        <a href="#" className="text-white hover:underline">
+                        <Link to="/register" className="text-white hover:underline">
                             Create account
-                        </a>
+                        </Link>
                     </p>
                 </div>
             </div>

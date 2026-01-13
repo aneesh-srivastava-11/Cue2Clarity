@@ -10,7 +10,7 @@ const Footer = () => {
                 <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                     {/* Copyright */}
                     <p className="text-gray-400 text-sm">
-                        © {currentYear} AI Assistant. All rights reserved.
+                        © {currentYear} Cue2Clarity. All rights reserved.
                     </p>
 
                     {/* Social Icons */}
