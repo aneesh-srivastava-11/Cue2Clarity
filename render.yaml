@@ -9,7 +9,6 @@ services:
         value: 3.9.0
       - key: NODE_VERSION
         value: 20.11.0
-    syncEnvVars:
       - key: GOOGLE_API_KEY
         sync: false
       - key: PINECONE_API_KEY
