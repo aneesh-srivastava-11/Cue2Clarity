@@ -23,7 +23,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-# 🔒 SIMPLE ADMIN PASSWORD (Change this in your .env or keep it here for dev)
+# 🔒 SIMPLE ADMIN PASSWORD
 ADMIN_SECRET = os.getenv("ADMIN_SECRET")
 
 if not all([GOOGLE_API_KEY, PINECONE_API_KEY, SUPABASE_URL, SUPABASE_KEY]):
@@ -147,6 +147,21 @@ PROMPT_TEMPLATES = {
     * **Concept Check**: Brief explanation of the relevant theory from the notes.
     * **Hint**: A clue or next step.
     * **Guiding Question**: Ask them something to check their understanding.
+    """,
+
+    "RSOC": """
+    You are an Academic Analyst using the RSOC (Recitation, Summary, Outline, Connection) framework.
+    GOAL: Provide a structured, deep-dive analysis of the topic based strictly on the provided context.
+
+    RESPONSE STRUCTURE:
+    1. **R - Recitation**: Define the concept or directly answer the question with precision using the notes.
+    2. **S - Summary**: Provide a concise 2-3 sentence overview of the topic's main idea.
+    3. **O - Outline**: Create a structured bullet-point list of the key components, steps, or arguments found in the text.
+    4. **C - Connection**: Explain how this topic connects to broader themes or other concepts mentioned in the notes.
+
+    VISUAL RULES:
+    - Use clear headings for each letter (e.g., "### R - Recitation").
+    - Use bolding for key terms.
     """
 }
 
@@ -171,7 +186,7 @@ async def chat_endpoint(request: QueryRequest):
         raw_chunks = [m['metadata']['text'] for m in matches if 'text' in m['metadata']]
         context_text = "\n\n".join([clean_response_text(c) for c in raw_chunks])
         
-        # Extract Sources (Same as before)
+        # Extract Sources
         unique_sources = {}
         for m in matches:
             filename = m['metadata'].get('source', 'Unknown')
@@ -188,11 +203,13 @@ async def chat_endpoint(request: QueryRequest):
         final_user_input = request.question
         
         if request.mode == "QUIZ":
-            # ✅ NOW USES THE DIFFICULTY PARAMETER
             final_user_input = f"Generate 10 {request.difficulty}-level Multiple Choice Questions (MCQs) specifically about the topic: '{request.question}'. Ensure they are solvable using the provided context."
         
         elif request.mode == "ASSIGNMENT":
             final_user_input = f"I am working on an assignment about '{request.question}'. Please provide a Socratic hint or guiding question to help me solve it, but DO NOT give me the direct answer yet."
+
+        elif request.mode == "RSOC":
+            final_user_input = f"Analyze the topic '{request.question}' using the RSOC (Recitation, Summary, Outline, Connection) format based strictly on the provided context."
 
         base_prompt = PROMPT_TEMPLATES.get(request.mode.upper(), PROMPT_TEMPLATES["LECTURE"])
         
@@ -274,13 +291,11 @@ async def upload_file(
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
 
-# --- 5. ADMIN ENDPOINTS (Use Postman or Curl to trigger) ---
+# --- 5. ADMIN ENDPOINTS ---
 
 @app.delete("/admin/delete-topic")
 async def delete_topic(request: DeleteTopicRequest, x_admin_secret: str = Header(None)):
     """Deletes all memories tagged with a specific Subject."""
-    
-    # 1. Security Check
     if x_admin_secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Invalid Admin Password")
     
@@ -290,7 +305,6 @@ async def delete_topic(request: DeleteTopicRequest, x_admin_secret: str = Header
 
     try:
         print(f"🗑️ ADMIN: Deleting topic '{target_subject}'...")
-        # Delete from Pinecone using Metadata Filter
         index.delete(filter={"subject": target_subject})
         return {"status": "success", "message": f"Deleted all memories for topic: {target_subject}"}
     except Exception as e:
@@ -299,22 +313,16 @@ async def delete_topic(request: DeleteTopicRequest, x_admin_secret: str = Header
 @app.delete("/admin/nuke-system")
 async def nuke_system(request: NukeRequest, x_admin_secret: str = Header(None)):
     """Wipes ALL Pinecone Vectors and Supabase Files."""
-    
-    # 1. Security Check
     if x_admin_secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Invalid Admin Password")
     
-    # 2. Safety Check (Require specific confirmation string)
     if request.confirmation != "DELETE_EVERYTHING":
         raise HTTPException(status_code=400, detail="Confirmation string mismatch. Type 'DELETE_EVERYTHING'.")
 
     try:
         print("☢️ ADMIN: NUKING SYSTEM...")
-        
-        # 1. Wipe Pinecone
         index.delete(delete_all=True)
         
-        # 2. Wipe Supabase
         files = supabase.storage.from_(BUCKET_NAME).list()
         if files:
             file_names = [f['name'] for f in files]
@@ -327,5 +335,4 @@ async def nuke_system(request: NukeRequest, x_admin_secret: str = Header(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    # Server starts immediately now
     uvicorn.run(app, host="127.0.0.1", port=8000)
