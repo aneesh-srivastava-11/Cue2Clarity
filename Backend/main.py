@@ -73,6 +73,46 @@ def clean_and_repair_text(text):
         text = text.replace(bad, good)
     return re.sub(r'\s+', ' ', text).strip()
 
+DIST_DIR = os.path.join(os.path.dirname(__file__), "../Front/Frontend/dist")
+print(f"🔍 DEBUG: Calculated DIST_DIR: {os.path.abspath(DIST_DIR)}")
+
+if os.path.exists(DIST_DIR):
+    print(f"✅ DEBUG: Found DIST_DIR. Contents: {os.listdir(DIST_DIR)}")
+    # Mount assets folder (e.g. /assets/index-D8zs....js)
+    app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
+
+    @app.get("/")
+    async def serve_root():
+        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+
+    @app.get("/{catchall:path}")
+    async def serve_react_app(catchall: str):
+        # Check if requested file exists in dist (e.g. vite.svg, favicon.ico)
+        file_path = os.path.join(DIST_DIR, catchall)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        
+        # Otherwise, return index.html for React Router to handle
+        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+else:
+    print(f"⚠️ WARNING: Frontend 'dist' directory NOT FOUND at {os.path.abspath(DIST_DIR)}")
+    print(f"📂 CWD: {os.getcwd()}")
+    try:
+        print(f"📂 Listing ../Front/Frontend: {os.listdir('../Front/Frontend')}")
+    except Exception as e:
+        print(f"❌ Error listing ../Front/Frontend: {e}")
+
+    @app.get("/")
+    async def serve_root_error():
+        return {
+            "error": "Frontend build not found.",
+            "diagnostics": {
+                "dist_dir_calculated": os.path.abspath(DIST_DIR),
+                "cwd": os.getcwd(),
+                "exists": os.path.exists(DIST_DIR)
+            }
+        }
+
 def sanitize_filename(filename):
     filename = re.sub(r'[^\x00-\x7f]', r'', filename)
     filename = re.sub(r'[\s\[\]\(\)]+', '_', filename)

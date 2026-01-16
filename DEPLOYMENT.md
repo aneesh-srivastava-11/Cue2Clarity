@@ -4,38 +4,51 @@ This guide explains how to deploy your **Cue2Clarity** application as a **single
 
 ## Prerequisites
 
-1.  **Push your code to GitHub**: Ensure the following files are committed and pushed:
-    - `render.yaml`
-    - `build.sh`
-    - `Backend/requirements.txt`
-    - Modified `Backend/main.py`
+1.  **Push your code to GitHub**: Ensure `build.sh`, `Backend/requirements.txt`, and the modified `Backend/main.py` are pushed.
 2.  **Render Account**: Create an account at [render.com](https://render.com).
 
-## Step 1: Create Blueprint
+---
 
-1.  Go to your [Render Dashboard](https://dashboard.render.com/).
-2.  Click **"New+"** -> **"Blueprint"**.
-3.  Connect your repository (Cue2Clarity).
-4.  Render will detect the `render.yaml`.
+## Option 1: Automatic (Blueprint) - Recommended
 
-## Step 2: Configure Environment Variables
+1.  Go to Dashboard -> **New+** -> **Blueprint**.
+2.  Connect your repo.
+3.  Accept the `render.yaml` configuration.
+4.  Enter your environment variables (`GOOGLE_API_KEY`, `SUPABASE_URL`, etc.) when prompted.
+5.  Click **Apply**.
 
-Fill in your secrets from your local `.env`. Key variables needed: `GOOGLE_API_KEY`, `PINECONE_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `ADMIN_SECRET`.
+---
 
-## Step 3: Deploy
+## Option 2: Manual "Web Service" Setup
 
-1.  Click **"Apply"**.
-2.  Render will:
-    - Run `build.sh`: Builds the React app and installs Python deps.
-    - Start the server using `uvicorn`.
-3.  Wait for the process to finish.
+If you prefer to set it up manually without the `render.yaml` blueprint:
 
-## Step 4: Verify
+1.  **Create Service**:
+    - Go to Dashboard -> **New+** -> **Web Service**.
+    - Connect your GitHub repository (`Cue2Clarity`).
 
-1.  Click the URL provided by Render (e.g., `https://cue2clarity.onrender.com`).
-2.  You should see your Frontend.
-3.  Any API calls will go to the same domain (e.g., `/chat` or `/upload`), avoiding CORS issues.
+2.  **Configure Settings**:
+    - **Name**: `cue2clarity` (or whatever you like)
+    - **Runtime**: **Python 3**
+    - **Build Command**: `chmod +x build.sh && ./build.sh`
+    - **Start Command**: `cd Backend && uvicorn main:app --host 0.0.0.0 --port 10000`
 
-**Troubleshooting:**
-- If you see "Frontend 'dist' directory not found" in logs, check if the build step ran successfully.
-- Check the "Logs" tab in Render for any errors.
+3.  **Environment Variables**:
+    - Scroll down to "Environment Variables" and add these:
+        - `PYTHON_VERSION`: `3.9.0`
+        - `NODE_VERSION`: `20.11.0`
+        - `GOOGLE_API_KEY`: *(paste from your .env)*
+        - `PINECONE_API_KEY`: *(paste from your .env)*
+        - `SUPABASE_URL`: *(paste from your .env)*
+        - `SUPABASE_KEY`: *(paste from your .env)*
+        - `ADMIN_SECRET`: *(paste from your .env)*
+
+4.  **Deploy**:
+    - Click **Create Web Service**.
+
+---
+
+## Troubleshooting
+
+- **"Frontend 'dist' directory not found"**: This means the build script failed to build the React app. Check the logs to see if `npm install` or `npm run build` failed.
+- **CORS Errors**: Since we are serving frontend and backend from the same domain, you shouldn't see these. If you do, ensure you aren't hardcoding `localhost:8000` in your frontend code.
