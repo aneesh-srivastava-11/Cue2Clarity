@@ -1,216 +1,331 @@
 import os
 import time
+import shutil
 import uvicorn
 import re
-from fastapi import FastAPI, HTTPException
+import sys
+import pdfplumber
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from fastapi.middleware.cors import CORSMiddleware
 
+# AI & Database Libraries
+import google.generativeai as genai
+from pinecone import Pinecone
+from supabase import create_client, Client
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-app = FastAPI()
+# --- 1. CONFIGURATION ---
+load_dotenv()
 
-# Allow requests from your local frontend
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# 🔒 SIMPLE ADMIN PASSWORD (Change this in your .env or keep it here for dev)
+ADMIN_SECRET = os.getenv("ADMIN_SECRET")
+
+if not all([GOOGLE_API_KEY, PINECONE_API_KEY, SUPABASE_URL, SUPABASE_KEY]):
+    raise ValueError("❌ Missing API Keys! Check your .env file.")
+
+genai.configure(api_key=GOOGLE_API_KEY)
+model = genai.GenerativeModel('models/gemini-2.5-flash')
+
+pc = Pinecone(api_key=PINECONE_API_KEY)
+index = pc.Index("cue2clarity")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+BUCKET_NAME = "course materials (input)"
+
+# 🔒 STRICTNESS SETTINGS
+SCORE_THRESHOLD = 0.35 
+
+app = FastAPI(title="Cue2Clarity Backend (Always On)")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # For development; change to specific URL later
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-class Question(BaseModel):
-    question: str
-
-@app.post("/chat")
-async def chat(request: Question):
-    # Your existing logic here...
-    return {
-        "answer": "This is a test response from the backend!", 
-        "sources": []
-    }
-
-
-
-# Google Library
-import google.generativeai as genai
-
-# ✅ NEW: Pinecone Library
-from pinecone import Pinecone
-
-# --- 1. CONFIGURATION ---
-load_dotenv()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY") # <--- Get this from .env
-
-if not GOOGLE_API_KEY:
-    raise ValueError("❌ Missing Google API Key! Check your .env file.")
-if not PINECONE_API_KEY:
-    raise ValueError("❌ Missing Pinecone API Key! Check your .env file.")
-
-# Configure Gemini
-genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('models/gemini-2.5-flash')
-
-# ✅ CONNECT TO PINECONE
-pc = Pinecone(api_key=PINECONE_API_KEY)
-index_name = "cue2clarity" # Make sure this matches the index name you created on pinecone.io
-
-# Connect to the index
-index = pc.Index(index_name)
-
-app = FastAPI(title="Student AI Backend (Pinecone Cloud)")
-
+# --- MODELS ---
 class QueryRequest(BaseModel):
     question: str
     mode: str = "LECTURE"
+    difficulty: str = "Medium"
 
-# --- 2. HELPER: SAFE EMBEDDING ---
+class DeleteTopicRequest(BaseModel):
+    subject: str
+
+class NukeRequest(BaseModel):
+    confirmation: str
+
+# --- 2. HELPERS ---
+def clean_and_repair_text(text):
+    if not text: return ""
+    replacements = {"\uf0e0": "->", "⇒": "=>", "→": "->", "–": "-", "•": "-"}
+    for bad, good in replacements.items():
+        text = text.replace(bad, good)
+    return re.sub(r'\s+', ' ', text).strip()
+
+def sanitize_filename(filename):
+    filename = re.sub(r'[^\x00-\x7f]', r'', filename)
+    filename = re.sub(r'[\s\[\]\(\)]+', '_', filename)
+    return filename.strip('_')
+
 def embed_text_with_retry(text):
-    retries = 5 
-    base_wait = 10
-    
+    retries = 3
     for attempt in range(retries):
         try:
             result = genai.embed_content(
                 model="models/text-embedding-004",
                 content=text,
-                task_type="retrieval_query"
+                task_type="retrieval_document"
             )
             return result['embedding']
         except Exception as e:
-            if "429" in str(e) or "ResourceExhausted" in str(e):
-                wait_time = base_wait * (2 ** attempt)
-                print(f"\n⏳ API Busy (Embedding). Pausing for {wait_time} seconds...")
-                time.sleep(wait_time)
-            else:
-                raise e 
-
-    raise HTTPException(status_code=429, detail="Google API is too busy. Please wait 2 minutes.")
-
-# --- 3. HELPER: SAFE GENERATION ---
-def generate_with_retry(prompt):
-    retries = 5
-    base_wait = 10 
-    
-    for attempt in range(retries):
-        try:
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            if "429" in str(e) or "ResourceExhausted" in str(e):
-                wait_time = base_wait * (2 ** attempt)
-                print(f"\n⏳ API Busy (Generation). Pausing for {wait_time} seconds...")
-                time.sleep(wait_time)
+            if "429" in str(e):
+                time.sleep(2 ** attempt)
             else:
                 raise e
+    raise HTTPException(status_code=429, detail="Google API Busy")
 
-    raise HTTPException(status_code=429, detail="AI Overloaded. Try again later.")
-
-# --- 4. HELPER: TEXT CLEANING ---
-def clean_text(text):
+def clean_response_text(text):
     if not text: return ""
-    text = text.replace("→", "->").replace("⇒", "=>")
-    text = re.sub(r'[\ue000-\uf8ff]', '->', text)
-    return text
+    return re.sub(r'[\ue000-\uf8ff]', '->', text).replace("→", "->")
 
-# --- 5. THE ENDPOINT ---
+# --- 3. PROMPT TEMPLATES ---
+PROMPT_TEMPLATES = {
+    "LECTURE": """
+    You are STUDENT-AI, a warm and encouraging academic tutor.
+    GOAL: Explain the answer clearly using ONLY the context provided below.
+    
+    CRITICAL RULE:
+    - If the answer is not in the context, say "I don't see that information in your notes."
+    - Do not make up facts.
+    
+    VISUAL STYLE RULES:
+    1. **Bolding**: Use double asterisks (**) to bold key terms.
+    2. **Headers**: Start major sections with "* ".
+    3. **Lists**: Use hyphens (- ) for bullet points.
+    4. **Whitespace**: Add a blank line between every paragraph.
+    """,
+    
+    "QUIZ": """
+    You are an Exam Generator.
+    GOAL: Generate 10 Multiple-Choice Questions (MCQs) based STRICTLY on the context provided.
+    
+    FORMAT FOR EACH QUESTION:
+    1. [Question Text]
+       a) [Option A]
+       b) [Option B]
+       c) [Option C]
+       d) [Option D]
+       
+    *Correct Answer: [Option Letter]*
+    
+    RULES:
+    - Questions must test understanding, not just memorization.
+    - Vary the difficulty.
+    - If the context is too short, generate as many valid questions as possible (up to 5).
+    """,
+    
+    "ASSIGNMENT": """
+    You are a Socratic Tutor helping a student with their homework.
+    GOAL: Guide the student to the answer WITHOUT giving it away immediately.
+    
+    RULES:
+    1. **Do NOT solve the problem completely.**
+    2. Provide **Hints**: Point them to the specific concept in the notes they need.
+    3. **Break it down**: If the question is complex, ask them a simpler leading question first.
+    4. **Formulas**: If a formula is required and present in the notes, show the formula but let them plug in the numbers.
+    
+    RESPONSE FORMAT:
+    * **Concept Check**: Brief explanation of the relevant theory from the notes.
+    * **Hint**: A clue or next step.
+    * **Guiding Question**: Ask them something to check their understanding.
+    """
+}
+
+# --- 4. ENDPOINTS ---
+
 @app.post("/chat")
 async def chat_endpoint(request: QueryRequest):
-    print(f"\n📨 [{request.mode}] Question: {request.question}")
+    print(f"\n📨 [{request.mode}] Question: {request.question} | Diff: {request.difficulty}")
     
     try:
-        # STEP A: Embed Question (Google)
         query_vector = embed_text_with_retry(request.question)
-
-        # STEP B: Search Database (Pinecone)
-        search_results = index.query(
-            vector=query_vector,
-            top_k=10,
-            include_metadata=True
-        )
-        
+        search_results = index.query(vector=query_vector, top_k=8, include_metadata=True)
         matches = search_results['matches']
-        if not matches:
-            context_text = "No relevant notes found."
-            sources = []
-        else:
-            # 1. Extract the text for the AI to read
-            raw_chunks = [match['metadata']['text'] for match in matches if 'text' in match['metadata']]
-            context_text = "\n\n".join([clean_text(c) for c in raw_chunks])
-            
-            # 2. Extract sources for the User to click (Unique list)
-            # We use a dictionary to remove duplicates based on the 'source' filename
-            unique_sources = {}
-            for match in matches:
-                meta = match['metadata']
-                filename = meta.get('source', 'Unknown')
-                
-                if filename not in unique_sources:
-                    unique_sources[filename] = {
-                        "source": filename,
-                        "pdf_url": meta.get('pdf_url', None), # <--- THIS IS THE NEW PART
-                        "chapter": meta.get('chapter', 'General'),
-                        "score": match['score']
-                    }
-            
-            # Convert back to a list
-            sources = list(unique_sources.values())
+        
+        # Guardrail
+        if not matches or matches[0]['score'] < SCORE_THRESHOLD:
+            return {
+                "answer": "I'm sorry, I couldn't find any information about that specific topic in your uploaded notes.",
+                "sources": []
+            }
 
-        # STEP C: Construct Prompt (Standard)
+        raw_chunks = [m['metadata']['text'] for m in matches if 'text' in m['metadata']]
+        context_text = "\n\n".join([clean_response_text(c) for c in raw_chunks])
+        
+        # Extract Sources (Same as before)
+        unique_sources = {}
+        for m in matches:
+            filename = m['metadata'].get('source', 'Unknown')
+            if filename not in unique_sources:
+                unique_sources[filename] = {
+                    "source": filename,
+                    "pdf_url": m['metadata'].get('pdf_url', None),
+                    "chapter": m['metadata'].get('chapter', 'General'),
+                    "score": m['score']
+                }
+        sources = list(unique_sources.values())
+
+        # --- 🧠 UPDATED PROMPT INJECTION ---
+        final_user_input = request.question
+        
+        if request.mode == "QUIZ":
+            # ✅ NOW USES THE DIFFICULTY PARAMETER
+            final_user_input = f"Generate 10 {request.difficulty}-level Multiple Choice Questions (MCQs) specifically about the topic: '{request.question}'. Ensure they are solvable using the provided context."
+        
+        elif request.mode == "ASSIGNMENT":
+            final_user_input = f"I am working on an assignment about '{request.question}'. Please provide a Socratic hint or guiding question to help me solve it, but DO NOT give me the direct answer yet."
+
+        base_prompt = PROMPT_TEMPLATES.get(request.mode.upper(), PROMPT_TEMPLATES["LECTURE"])
+        
         system_instruction = f"""
-        You are STUDENT-AI, a warm, encouraging, and intelligent academic tutor.
-        
-        YOUR GOAL: 
-        Make the student feel supported while explaining complex topics clearly.
-        
-        YOUR MODE: {request.mode}
-        
-        ────────────────────────────────────
-        VISUAL STYLE RULES (SOOTHING LAYOUT)
-        ────────────────────────────────────
-        1. USE HEADERS: Start every major section with "### " (e.g., "### The Core Concept").
-        2. BOLDING: Use **bold text** to highlight keywords.
-        3. WHITESPACE: Short paragraphs. Blank lines between items.
-        4. LISTS: Use bullet points (-).
-        
-        ────────────────────────────────────
-        TONE & PERSONA
-        ────────────────────────────────────
-        1. WARM OPENER: Start friendly.
-        2. EMPATHY: Validate difficult topics.
-        3. ANALOGIES: Use simple comparisons.
-        
-        ────────────────────────────────────
-        CORE RULES
-        ────────────────────────────────────
-        1. CONTEXT ONLY: Answer strictly using the notes below.
-        2. CLEAN OUTPUT: No Unicode arrows (->).
-        3. CITATIONS: Mention [Chapter: X] or [Source: Y].
-        
-        ────────────────────────────────────
-        CONTEXT
-        ────────────────────────────────────
+        {base_prompt}
+        CONTEXT (Use ONLY this):
         {context_text}
-        ────────────────────────────────────
-        
-        QUESTION:
-        {request.question}
+        USER REQUEST:
+        {final_user_input}
         """
 
-        # STEP D: Generate
-        answer = generate_with_retry(system_instruction)
-        final_answer = clean_text(answer)
-
-        return {
-            "answer": final_answer,
-            "sources": sources
-        }
+        response = model.generate_content(system_instruction)
+        return {"answer": clean_response_text(response.text), "sources": sources}
 
     except Exception as e:
-        print(f"❌ CRITICAL ERROR: {e}")
+        print(f"❌ Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    subject: str = Form(...),
+    chapter: str = Form(...)
+):
+    safe_filename = sanitize_filename(file.filename)
+    print(f"📥 Uploading: {safe_filename} | Subject: {subject} | Chapter: {chapter}")
+    
+    temp_filename = f"temp_{safe_filename}"
+    
+    try:
+        with open(temp_filename, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        with open(temp_filename, "rb") as f:
+            file_bytes = f.read()
+            supabase.storage.from_(BUCKET_NAME).upload(
+                path=safe_filename, 
+                file=file_bytes, 
+                file_options={"content-type": "application/pdf", "upsert": "true"}
+            )
+        
+        public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(safe_filename)
+
+        full_text = ""
+        with pdfplumber.open(temp_filename) as pdf:
+            for page in pdf.pages:
+                t = page.extract_text()
+                if t: full_text += clean_and_repair_text(t) + "\n\n"
+
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        chunks = text_splitter.split_text(full_text)
+        
+        vectors = []
+        for i, chunk in enumerate(chunks):
+            embedding = embed_text_with_retry(chunk)
+            vectors.append({
+                "id": f"{safe_filename}_chunk_{i}",
+                "values": embedding,
+                "metadata": {
+                    "text": chunk,
+                    "source": safe_filename,
+                    "subject": subject,
+                    "chapter": chapter,
+                    "pdf_url": public_url,
+                    "chunk_index": i
+                }
+            })
+
+        batch_size = 100
+        for i in range(0, len(vectors), batch_size):
+            index.upsert(vectors=vectors[i:i + batch_size])
+        
+        return {"status": "success", "filename": safe_filename, "chunks": len(chunks)}
+
+    except Exception as e:
+        print(f"❌ Upload Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+
+# --- 5. ADMIN ENDPOINTS (Use Postman or Curl to trigger) ---
+
+@app.delete("/admin/delete-topic")
+async def delete_topic(request: DeleteTopicRequest, x_admin_secret: str = Header(None)):
+    """Deletes all memories tagged with a specific Subject."""
+    
+    # 1. Security Check
+    if x_admin_secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid Admin Password")
+    
+    target_subject = request.subject.strip()
+    if not target_subject:
+        raise HTTPException(status_code=400, detail="Subject cannot be empty")
+
+    try:
+        print(f"🗑️ ADMIN: Deleting topic '{target_subject}'...")
+        # Delete from Pinecone using Metadata Filter
+        index.delete(filter={"subject": target_subject})
+        return {"status": "success", "message": f"Deleted all memories for topic: {target_subject}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/admin/nuke-system")
+async def nuke_system(request: NukeRequest, x_admin_secret: str = Header(None)):
+    """Wipes ALL Pinecone Vectors and Supabase Files."""
+    
+    # 1. Security Check
+    if x_admin_secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid Admin Password")
+    
+    # 2. Safety Check (Require specific confirmation string)
+    if request.confirmation != "DELETE_EVERYTHING":
+        raise HTTPException(status_code=400, detail="Confirmation string mismatch. Type 'DELETE_EVERYTHING'.")
+
+    try:
+        print("☢️ ADMIN: NUKING SYSTEM...")
+        
+        # 1. Wipe Pinecone
+        index.delete(delete_all=True)
+        
+        # 2. Wipe Supabase
+        files = supabase.storage.from_(BUCKET_NAME).list()
+        if files:
+            file_names = [f['name'] for f in files]
+            if file_names:
+                supabase.storage.from_(BUCKET_NAME).remove(file_names)
+        
+        print("✅ System Reset Complete.")
+        return {"status": "success", "message": "System fully reset."}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
+    # Server starts immediately now
     uvicorn.run(app, host="127.0.0.1", port=8000)

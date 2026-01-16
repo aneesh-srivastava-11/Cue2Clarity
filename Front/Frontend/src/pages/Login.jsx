@@ -1,34 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import Input from '../components/Input';
 import Button from '../components/Button';
-import { Github, Mail } from 'lucide-react';
+import { Github, Mail, Brain } from 'lucide-react'; 
 import { useAuth } from '../context/AuthContext';
+
+// Lazy load background
+const VantaBackground = React.lazy(() => import('../components/VantaBackground'));
 
 const Login = () => {
     const navigate = useNavigate();
     const { login, googleSignIn, loginAnonymously } = useAuth();
-    const [formData, setFormData] = useState({
-        email: '',
-        password: '',
-    });
+    const [formData, setFormData] = useState({ email: '', password: '' });
     const [errors, setErrors] = useState({});
     const [loading, setLoading] = useState(false);
     const [authError, setAuthError] = useState('');
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            [name]: value
-        }));
-        // Clear error when user starts typing
-        if (errors[name]) {
-            setErrors(prev => ({
-                ...prev,
-                [name]: ''
-            }));
-        }
+        setFormData(prev => ({ ...prev, [name]: value }));
+        if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
         setAuthError('');
     };
 
@@ -60,22 +51,10 @@ const Login = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-
-        // Simple validation
         const newErrors = {};
-        if (!formData.email) {
-            newErrors.email = 'Email is required';
-        }
-
-        // OWASP: Regular expressions for email validation
-        // Using a basic one here, but can be more strict if needed.
-        else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-            newErrors.email = 'Email is invalid';
-        }
-
-        if (!formData.password) {
-            newErrors.password = 'Password is required';
-        }
+        if (!formData.email) newErrors.email = 'Email is required';
+        else if (!/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = 'Email is invalid';
+        if (!formData.password) newErrors.password = 'Password is required';
 
         if (Object.keys(newErrors).length > 0) {
             setErrors(newErrors);
@@ -88,8 +67,6 @@ const Login = () => {
             navigate('/chat');
         } catch (error) {
             console.error('Login error:', error);
-            // OWASP: Do not fail exactly with "User not found" to prevent enumeration.
-            // Use generic messages.
             setAuthError('Failed to sign in. Please check your credentials.');
         } finally {
             setLoading(false);
@@ -97,26 +74,41 @@ const Login = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center px-4 bg-background">
-            <div className="w-full max-w-md animate-fade-in">
+        <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
+            
+            {/* Background Animation */}
+            <div className="fixed inset-0 -z-20 bg-[#0f1115]" />
+            <Suspense fallback={null}>
+                <VantaBackground />
+            </Suspense>
+
+            <div className="w-full max-w-md animate-fade-in relative z-10">
                 {/* Login Card */}
-                <div className="card">
-                    {/* Logo/App Name */}
+                <div className="bg-black/40 backdrop-blur-md border border-white/10 p-8 rounded-2xl shadow-2xl">
+                    
+                    {/* ✅ UPDATED LOGO SECTION */}
                     <div className="text-center mb-8">
-                        <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4">
-                            <span className="text-black font-bold text-3xl">C</span>
+                        {/* The Faded Black Box Container */}
+                        <div className="w-16 h-16 bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+                            {/* Emerald Brain Icon */}
+                            <Brain className="w-8 h-8 text-emerald-400" />
                         </div>
-                        <h1 className="text-3xl font-bold text-white mb-2">Welcome Back</h1>
-                        <p className="text-gray-400">Sign in to continue to Cue2Clarity</p>
+                        
+                        {/* Text */}
+                        <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">
+                            Cue2<span className="text-emerald-400">Clarity</span>
+                        </h1>
+                        <p className="text-gray-400">Sign in to continue</p>
                     </div>
 
-                    {/* Login Form */}
+                    {/* Error Message */}
                     {authError && (
-                        <div className="bg-red-500/10 border border-red-500/50 text-red-500 text-sm p-3 rounded-lg mb-4 text-center">
+                        <div className="bg-red-500/10 border border-red-500/50 text-red-500 text-sm p-3 rounded-lg mb-4 text-center animate-pulse">
                             {authError}
                         </div>
                     )}
 
+                    {/* Form */}
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <Input
                             type="email"
@@ -142,7 +134,7 @@ const Login = () => {
 
                         <div className="flex items-center justify-between text-sm">
                             <label className="flex items-center text-gray-400 cursor-pointer hover:text-white transition-colors">
-                                <input type="checkbox" className="mr-2 rounded" />
+                                <input type="checkbox" className="mr-2 rounded bg-black/50 border-gray-600 text-emerald-500 focus:ring-emerald-500" />
                                 Remember me
                             </label>
                             <a href="#" className="text-gray-400 hover:text-white transition-colors">
@@ -150,7 +142,7 @@ const Login = () => {
                             </a>
                         </div>
 
-                        <Button type="submit" variant="primary" className="w-full" disabled={loading}>
+                        <Button type="submit" variant="primary" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20" disabled={loading}>
                             {loading ? 'Logging in...' : 'Login'}
                         </Button>
                     </form>
@@ -158,22 +150,22 @@ const Login = () => {
                     {/* Divider */}
                     <div className="relative my-8">
                         <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-border"></div>
+                            <div className="w-full border-t border-gray-700"></div>
                         </div>
                         <div className="relative flex justify-center text-sm">
-                            <span className="px-4 bg-card text-gray-400">Or continue with</span>
+                            <span className="px-4 bg-transparent text-gray-400 bg-[#0f1115]/50 backdrop-blur-sm rounded">Or continue with</span>
                         </div>
                     </div>
 
                     {/* Social Login */}
                     <div className="grid grid-cols-2 gap-4">
-                        <Button variant="ghost" className="w-full border border-border">
+                        <Button variant="ghost" className="w-full border border-gray-700 hover:bg-white/5 text-gray-300">
                             <Github size={20} />
                             GitHub
                         </Button>
                         <Button
                             variant="ghost"
-                            className="w-full border border-border"
+                            className="w-full border border-gray-700 hover:bg-white/5 text-gray-300"
                             onClick={handleGoogleSignIn}
                             disabled={loading}
                         >
@@ -186,7 +178,7 @@ const Login = () => {
                         <Button
                             onClick={handleGuestLogin}
                             variant="ghost"
-                            className="w-full border border-border text-gray-400 hover:text-white"
+                            className="w-full border border-gray-700 text-gray-400 hover:text-white hover:bg-white/5"
                             disabled={loading}
                         >
                             Skip for now (Guest)
@@ -196,7 +188,7 @@ const Login = () => {
                     {/* Create Account */}
                     <p className="text-center text-gray-400 text-sm mt-8">
                         Don't have an account?{' '}
-                        <Link to="/register" className="text-white hover:underline">
+                        <Link to="/register" className="text-emerald-400 hover:text-emerald-300 hover:underline">
                             Create account
                         </Link>
                     </p>

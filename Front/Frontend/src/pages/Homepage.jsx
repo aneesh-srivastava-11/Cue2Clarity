@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { Suspense } from 'react'; // <--- 1. Import Suspense
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import FeatureCard from '../components/FeatureCard';
 import Button from '../components/Button';
 import { Upload, History, Lock, Brain } from 'lucide-react';
+
+// <--- 2. Lazy Import (Replaces the normal import)
+const VantaBackground = React.lazy(() => import('../components/VantaBackground'));
 
 const Homepage = () => {
     const navigate = useNavigate();
@@ -33,21 +36,32 @@ const Homepage = () => {
     ];
 
     return (
-        <div className="min-h-screen flex flex-col">
+        <div className="min-h-screen flex flex-col relative overflow-hidden">
+            
+            {/* ✅ 3. BACKGROUND ANIMATION (Lazy Loaded) */}
+            {/* We show a solid dark color while the heavy 3D engine loads */}
+            <div className="fixed inset-0 -z-20 bg-[#0f1115]" />
+            
+            <Suspense fallback={null}>
+                <VantaBackground />
+            </Suspense>
+
+            {/* Navbar sits on top */}
             <Navbar />
 
-            {/* Hero Section */}
-            <section className="flex-1 flex items-center justify-center px-4 pt-24 pb-16">
+            {/* --- HERO SECTION --- */}
+            <section className="flex-1 flex items-center justify-center px-4 pt-24 pb-16 relative z-10">
                 <div className="max-w-4xl mx-auto text-center space-y-8 animate-fade-in">
+                    
                     {/* Headline */}
-                    <h1 className="text-5xl md:text-7xl font-bold text-white leading-tight">
+                    <h1 className="text-5xl md:text-7xl font-bold text-white leading-tight drop-shadow-lg">
                         Your Learning Companion,
                         <br />
-                        <span className="text-gradient">Reimagined</span>
+                        <span className="text-emerald-400">Reimagined</span>
                     </h1>
 
                     {/* Subtext */}
-                    <p className="text-xl md:text-2xl text-gray-400 max-w-2xl mx-auto leading-relaxed">
+                    <p className="text-xl md:text-2xl text-gray-300 max-w-2xl mx-auto leading-relaxed drop-shadow-md">
                         Experience the future of conversational AI. Smart, intuitive, and designed to understand you better.
                     </p>
 
@@ -56,7 +70,7 @@ const Homepage = () => {
                         <Button
                             variant="primary"
                             onClick={() => navigate('/login')}
-                            className="w-full sm:w-auto"
+                            className="w-full sm:w-auto shadow-lg shadow-emerald-900/20 hover:shadow-emerald-500/30 transition-shadow"
                         >
                             Get Started
                         </Button>
@@ -64,14 +78,14 @@ const Homepage = () => {
                 </div>
             </section>
 
-            {/* Features Section */}
-            <section id="features" className="py-20 px-4 bg-card/30">
+            {/* --- FEATURES SECTION --- */}
+            <section id="features" className="py-20 px-4 bg-black/20 backdrop-blur-sm border-t border-white/5 relative z-10">
                 <div className="max-w-7xl mx-auto">
                     <div className="text-center mb-16">
-                        <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
+                        <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 drop-shadow-md">
                             Powerful Features
                         </h2>
-                        <p className="text-xl text-gray-400">
+                        <p className="text-xl text-gray-300">
                             Everything you need for intelligent conversations
                         </p>
                     </div>
