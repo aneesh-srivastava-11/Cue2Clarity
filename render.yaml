@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: cue2clarity
+    runtime: python
+    buildCommand: chmod +x build.sh && ./build.sh
+    startCommand: cd Backend && uvicorn main:app --host 0.0.0.0 --port 10000
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.0
+      - key: NODE_VERSION
+        value: 20.11.0
+    syncEnvVars:
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: ADMIN_SECRET
+        sync: false

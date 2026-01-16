@@ -6,6 +6,8 @@ import re
 import sys
 import pdfplumber
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv

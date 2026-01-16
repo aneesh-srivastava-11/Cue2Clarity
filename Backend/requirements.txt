@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-dotenv
+google-generativeai
+pinecone-client
+supabase
+langchain-text-splitters
+pdfplumber
+pydantic
+python-multipart
