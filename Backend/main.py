@@ -32,7 +32,7 @@ if not all([GOOGLE_API_KEY, PINECONE_API_KEY, SUPABASE_URL, SUPABASE_KEY]):
     raise ValueError("❌ Missing API Keys! Check your .env file.")
 
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('models/gemini-2.5-flash')
+model = genai.GenerativeModel('models/gemini-2.5-flash-lite')
 
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index("cue2clarity")
